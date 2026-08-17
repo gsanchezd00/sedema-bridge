@@ -9,6 +9,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: actualizar-sedema
+  cancel-in-progress: false
+
 jobs:
   actualizar:
     runs-on: ubuntu-latest
@@ -16,38 +20,82 @@ jobs:
     steps:
 
       - name: Descargar repositorio
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
-      - name: Descargar reporte SEDEMA
+      - name: Descargar SEDEMA
         shell: bash
         run: |
+
           mkdir -p data
 
+          cat > /tmp/openssl-sedema.cnf <<'EOF'
+          openssl_conf = openssl_init
+
+          [openssl_init]
+          ssl_conf = ssl_sect
+
+          [ssl_sect]
+          system_default = system_default_sect
+
+          [system_default_sect]
+          Options = UnsafeLegacyServerConnect
+          MinProtocol = TLSv1
+          CipherString = DEFAULT:@SECLEVEL=0
+          EOF
+
+          export OPENSSL_CONF=/tmp/openssl-sedema.cnf
+
+          echo "========================================"
+          echo "DESCARGANDO DATOS DE SEDEMA"
+          echo "========================================"
+
           curl \
+            --http1.1 \
             --insecure \
             --location \
-            --fail \
+            --fail-with-body \
             --retry 3 \
-            --connect-timeout 20 \
-            --max-time 60 \
-            --user-agent "Mozilla/5.0 (compatible; NMAS-SEDEMA-Bridge/1.0)" \
+            --retry-all-errors \
+            --connect-timeout 30 \
+            --max-time 90 \
+            --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/151 Safari/537.36" \
+            --header "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" \
+            --header "Accept-Language: es-MX,es;q=0.9,en;q=0.8" \
             "https://www.aire.cdmx.gob.mx/ultima-hora-reporte.php" \
-            --output data/ultima-hora-reporte.html
+            --output data/sedema_raw.html
 
-          test -s data/ultima-hora-reporte.html
+          if [ ! -s data/sedema_raw.html ]; then
+            echo "ERROR: SEDEMA no entregó información."
+            exit 1
+          fi
 
-      - name: Guardar actualización
+          echo ""
+          echo "SEDEMA DESCARGADO CORRECTAMENTE"
+          echo "Tamaño:"
+          wc -c data/sedema_raw.html
+
+      - name: Guardar datos en GitHub
         shell: bash
         run: |
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git add data/ultima-hora-reporte.html
+          git add data/sedema_raw.html
 
           if git diff --cached --quiet
           then
-            echo "No existen cambios."
+
+            echo "SEDEMA no presentó cambios."
+
           else
-            git commit -m "Actualizar reporte SEDEMA"
-            git push
+
+            git commit -m "Actualizar datos SEDEMA"
+
+            git pull --rebase origin main
+
+            git push origin main
+
+            echo "Datos SEDEMA guardados."
+
           fi
