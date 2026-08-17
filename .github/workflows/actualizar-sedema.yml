@@ -1,0 +1,53 @@
+name: Actualizar SEDEMA
+
+on:
+  workflow_dispatch:
+
+  schedule:
+    - cron: '2/5 * * * *'
+
+permissions:
+  contents: write
+
+jobs:
+  actualizar:
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Descargar reporte SEDEMA
+        shell: bash
+        run: |
+          mkdir -p data
+
+          curl \
+            --insecure \
+            --location \
+            --fail \
+            --retry 3 \
+            --connect-timeout 20 \
+            --max-time 60 \
+            --user-agent "Mozilla/5.0 (compatible; NMAS-SEDEMA-Bridge/1.0)" \
+            "https://www.aire.cdmx.gob.mx/ultima-hora-reporte.php" \
+            --output data/ultima-hora-reporte.html
+
+          test -s data/ultima-hora-reporte.html
+
+      - name: Guardar actualización
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add data/ultima-hora-reporte.html
+
+          if git diff --cached --quiet
+          then
+            echo "No existen cambios."
+          else
+            git commit -m "Actualizar reporte SEDEMA"
+            git push
+          fi
