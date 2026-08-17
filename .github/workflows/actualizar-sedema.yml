@@ -10,11 +10,13 @@ permissions:
   contents: write
 
 concurrency:
-  group: actualizar-sedema
+  group: sedema-bridge
   cancel-in-progress: false
 
 jobs:
+
   actualizar:
+
     runs-on: ubuntu-latest
 
     steps:
@@ -22,11 +24,9 @@ jobs:
       - name: Descargar repositorio
         uses: actions/checkout@v6
 
-      - name: Descargar SEDEMA
+      - name: Preparar compatibilidad SSL
         shell: bash
         run: |
-
-          mkdir -p data
 
           cat > /tmp/openssl-sedema.cnf <<'EOF'
           openssl_conf = openssl_init
@@ -38,16 +38,22 @@ jobs:
           system_default = system_default_sect
 
           [system_default_sect]
-          Options = UnsafeLegacyServerConnect
-          MinProtocol = TLSv1
+          Options = UnsafeLegacyServerConnect,UnsafeLegacyRenegotiation
           CipherString = DEFAULT:@SECLEVEL=0
+          MinProtocol = TLSv1
           EOF
 
-          export OPENSSL_CONF=/tmp/openssl-sedema.cnf
+          echo "OPENSSL_CONF=/tmp/openssl-sedema.cnf" >> "$GITHUB_ENV"
 
-          echo "========================================"
-          echo "DESCARGANDO DATOS DE SEDEMA"
-          echo "========================================"
+      - name: Descargar datos RAW de SEDEMA
+        shell: bash
+        run: |
+
+          mkdir -p data
+
+          echo "====================================="
+          echo "DESCARGANDO SEDEMA"
+          echo "====================================="
 
           curl \
             --http1.1 \
@@ -55,24 +61,34 @@ jobs:
             --location \
             --fail-with-body \
             --retry 3 \
+            --retry-delay 3 \
             --retry-all-errors \
             --connect-timeout 30 \
-            --max-time 90 \
+            --max-time 120 \
+            --ciphers 'DEFAULT:@SECLEVEL=0' \
             --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/151 Safari/537.36" \
             --header "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" \
             --header "Accept-Language: es-MX,es;q=0.9,en;q=0.8" \
             "https://www.aire.cdmx.gob.mx/ultima-hora-reporte.php" \
             --output data/sedema_raw.html
 
+          echo ""
+          echo "====================================="
+          echo "VERIFICANDO ARCHIVO"
+          echo "====================================="
+
           if [ ! -s data/sedema_raw.html ]; then
-            echo "ERROR: SEDEMA no entregó información."
+            echo "ERROR: El archivo está vacío."
             exit 1
           fi
 
+          echo "ARCHIVO RECIBIDO"
           echo ""
-          echo "SEDEMA DESCARGADO CORRECTAMENTE"
-          echo "Tamaño:"
           wc -c data/sedema_raw.html
+
+          echo ""
+          echo "Primeros caracteres:"
+          head -c 300 data/sedema_raw.html || true
 
       - name: Guardar datos en GitHub
         shell: bash
@@ -86,16 +102,16 @@ jobs:
           if git diff --cached --quiet
           then
 
-            echo "SEDEMA no presentó cambios."
+            echo "No existen cambios en SEDEMA."
 
           else
 
-            git commit -m "Actualizar datos SEDEMA"
+            git commit -m "Actualizar datos RAW SEDEMA"
 
             git pull --rebase origin main
 
             git push origin main
 
-            echo "Datos SEDEMA guardados."
+            echo "SEDEMA actualizado correctamente."
 
           fi
